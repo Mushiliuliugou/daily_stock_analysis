@@ -91,6 +91,15 @@ from src.notification_sender import (
 logger = logging.getLogger(__name__)
 
 
+def _format_volume_metric(value: Any, percent: bool = False) -> str:
+    """Attach units only to finite numeric observations."""
+    import math
+    number = _safe_float(value)
+    if number is None or not math.isfinite(number) or number < 0:
+        return "N/A"
+    return f"{number:g}" + ("%" if percent else "")
+
+
 def _safe_float(value: Any) -> Optional[float]:
     """Best-effort float conversion; handles `"3.2%"` and `"1,234"` shapes."""
     if value is None:
@@ -1460,8 +1469,8 @@ class NotificationService(
                     # 量能分析
                     if vol_data:
                         report_lines.extend([
-                            f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {vol_data.get('volume_ratio', 'N/A')} ({vol_data.get('volume_status', '')}) | "
-                            f"{labels['turnover_rate_label']} {vol_data.get('turnover_rate', 'N/A')}%",
+                            f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {_format_volume_metric(vol_data.get('volume_ratio'))} ({vol_data.get('volume_status', '')}) | "
+                            f"{labels['turnover_rate_label']} {_format_volume_metric(vol_data.get('turnover_rate'), percent=True)}",
                             f"💡 *{vol_data.get('volume_meaning', '')}*",
                             "",
                         ])

@@ -1602,7 +1602,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
             section_number = 3
             sections: List[str] = []
-            if self.profile.has_market_stats:
+            if self.profile.has_market_stats and (overview.up_count + overview.down_count + overview.flat_count > 0):
                 sections.append(f"""### {section_number}. Fund Flows
 (Interpret only the provided turnover, participation, breadth, and flow signals.)""")
                 section_number += 1
@@ -1697,7 +1697,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         sector_block = ""
         data_limits_block = ""
         if review_language == "en":
-            if self.profile.has_market_stats:
+            if self.profile.has_market_stats and (overview.up_count + overview.down_count + overview.flat_count > 0):
                 stats_block = f"""## Market Breadth
 - Advancers: {overview.up_count} | Decliners: {overview.down_count} | Flat: {overview.flat_count}
 - Limit-up: {overview.limit_up_count} | Limit-down: {overview.limit_down_count}
@@ -1711,7 +1711,7 @@ Concept leading: {top_concepts_text if top_concepts_text else "N/A"}
 Concept lagging: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
 
             data_limit_lines = []
-            if not self.profile.has_market_stats:
+            if not self.profile.has_market_stats or not (overview.up_count + overview.down_count + overview.flat_count > 0):
                 data_limit_lines.append(
                     "- Market breadth, aggregate turnover, participation, and fund-flow signals are not available for this market."
                 )
@@ -1720,7 +1720,7 @@ Concept lagging: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
             if data_limit_lines:
                 data_limits_block = "## Data Limits\n" + "\n".join(data_limit_lines)
         else:
-            if self.profile.has_market_stats:
+            if self.profile.has_market_stats and (overview.up_count + overview.down_count + overview.flat_count > 0):
                 stats_block = f"""## 市场概况
 - 上涨: {overview.up_count} 家 | 下跌: {overview.down_count} 家 | 平盘: {overview.flat_count} 家
 - 涨停: {overview.limit_up_count} 家 | 跌停: {overview.limit_down_count} 家
@@ -1734,7 +1734,7 @@ Concept lagging: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
 概念领跌: {bottom_concepts_text if bottom_concepts_text else "暂无数据"}"""
 
             data_limit_lines = []
-            if not self.profile.has_market_stats:
+            if not self.profile.has_market_stats or not (overview.up_count + overview.down_count + overview.flat_count > 0):
                 data_limit_lines.append("- 该市场暂无涨跌家数、涨跌停、成交额汇总、参与度或资金流信号。")
             if not self.profile.has_sector_rankings:
                 data_limit_lines.append("- 该市场暂无行业板块/概念题材涨跌榜。")
