@@ -566,6 +566,18 @@ class BaseFetcher(ABC):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
+        # Normalize share/lot volume only when turnover and OHLC verify the unit.
+        # Efinance/Akshare daily bars may return lots while realtime quotes use shares.
+        if {'amount', 'volume', 'low', 'high'}.issubset(df.columns):
+            average_price = df['amount'] / df['volume'].where(df['volume'] > 0)
+            share_price = average_price / 100
+            in_share_range = average_price.between(df['low'] * 0.98, df['high'] * 1.02)
+            in_lot_range = share_price.between(df['low'] * 0.98, df['high'] * 1.02)
+            lots = ~in_share_range & in_lot_range
+            if lots.any():
+                logger.info("[%s] Normalized %s daily volume rows from lots to shares", self.name, int(lots.sum()))
+                df.loc[lots, 'volume'] = df.loc[lots, 'volume'] * 100
+
         # 去除关键列为空的行
         df = df.dropna(subset=['close', 'volume'])
         

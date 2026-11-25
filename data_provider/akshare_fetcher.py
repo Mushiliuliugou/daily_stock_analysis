@@ -1618,6 +1618,46 @@ class AkshareFetcher(BaseFetcher):
             circuit_breaker.record_failure(source_key, str(e))
             return None
     
+    def _get_hk_single_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
+        """Fetch a single HK quote with explicit decimal prices and share volume."""
+        from datetime import timezone
+
+        code = stock_code.lower().removeprefix('hk').removesuffix('.hk').zfill(5)
+        for attempt in range(2):
+            try:
+                response = requests.get(
+                    f"https://push2.eastmoney.com/api/qt/stock/get?secid=116.{code}"
+                    "&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f86,f116,f117,f168,f169,f170",
+                    headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=10,
+                )
+                response.raise_for_status()
+                data = response.json().get('data') or {}
+                price = safe_float(data.get('f43'))
+                if str(data.get('f57', '')).zfill(5) != code or price is None or price <= 0:
+                    raise ValueError("empty or mismatched HK quote")
+                timestamp = safe_float(data.get('f86'))
+                quote = UnifiedRealtimeQuote(
+                    code=stock_code, name=str(data.get('f58') or ''),
+                    source=RealtimeSource.AKSHARE_EM, price=price,
+                    volume=safe_int(data.get('f47')), amount=safe_float(data.get('f48')),
+                    volume_ratio=safe_float(data.get('f50')),
+                    turnover_rate=safe_float(data.get('f168')),
+                    change_pct=safe_float(data.get('f170')),
+                    change_amount=safe_float(data.get('f169')),
+                    open_price=safe_float(data.get('f46')), high=safe_float(data.get('f44')),
+                    low=safe_float(data.get('f45')), pre_close=safe_float(data.get('f60')),
+                    total_mv=safe_float(data.get('f116')), circ_mv=safe_float(data.get('f117')),
+                    provider_timestamp=datetime.fromtimestamp(timestamp, timezone.utc).isoformat() if timestamp else None,
+                )
+                logger.info("[HK single quote] %s price=%s volume_ratio=%s turnover_rate=%s timestamp=%s",
+                            stock_code, price, quote.volume_ratio, quote.turnover_rate, quote.provider_timestamp)
+                return quote
+            except (requests.RequestException, ValueError, TypeError, OverflowError, OSError) as exc:
+                logger.warning("[HK single quote] %s attempt=%s failed: %s", stock_code, attempt + 1, exc)
+                if attempt == 0:
+                    time.sleep(1)
+        return None
+
     def _get_hk_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         """
         获取港股实时行情数据
@@ -1632,6 +1672,9 @@ class AkshareFetcher(BaseFetcher):
         Returns:
             UnifiedRealtimeQuote 对象，获取失败返回 None
         """
+        single_quote = self._get_hk_single_quote(stock_code)
+        if single_quote is not None and single_quote.volume_ratio is not None and single_quote.turnover_rate is not None:
+            return single_quote
         import akshare as ak
         circuit_breaker = get_realtime_circuit_breaker()
         em_key = "akshare_hk_em"
@@ -1802,7 +1845,7 @@ class AkshareFetcher(BaseFetcher):
             quote = UnifiedRealtimeQuote(
                 code=stock_code,
                 name=str(row.get('名称', '')),
-                source=RealtimeSource.AKSHARE_EM,
+                source=RealtimeSource.AKSHARE_SINA,
                 price=safe_float(row.get('最新价')),
                 change_pct=safe_float(row.get('涨跌幅')),
                 change_amount=safe_float(row.get('涨跌额')),
