@@ -4564,7 +4564,7 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
             report_date = financial_report.get("report_date") or "N/A"
             if financial_report.get('newer_period_seen'):
                 prompt += f"\nOUTDATED STRUCTURED REPORT: financial table period {report_date}; crosscheck has newer period {financial_report['newer_period_seen']}. Do not use the old table to conclude current earnings. Verify the newer evidence and disclose any currency/period ambiguity.\n"
-            prompt += f"\nFinancial statement basis {financial_report.get("period_type", "source_unspecified")}; TTM is not a quarter. Do not assume an unspecified basis is quarterly.\n"
+            prompt += f"\nFinancial statement basis {financial_report.get('period_type', 'source_unspecified')}; TTM is not a quarter. Do not assume an unspecified basis is quarterly.\n"
             prompt += "\nFinancial data limits: the supplied statement period has not been verified as the latest filing. Keep quarterly, year-to-date, TTM and ROE bases distinct. Old statements and negative PE do not establish the latest quarter's profitability.\n"
             if english:
                 prompt += f"""

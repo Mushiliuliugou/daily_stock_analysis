@@ -3,7 +3,7 @@ name: 每日股票分析
 on:
   push:
     branches: [main]
-    paths: ['src/services/company_disclosures.py']
+    paths: ['src/services/company_disclosures.py', 'src/analyzer.py']
   # 定时触发 - 每天北京时间 18:17 (UTC 10:00)
   schedule:
     - cron: '17 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:17
@@ -53,6 +53,9 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       
+      - name: 校验分析代码语法
+        run: python -m compileall -q src data_provider
+
       - name: 安装依赖
         run: |
           pip install --upgrade pip
