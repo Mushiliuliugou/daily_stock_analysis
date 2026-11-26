@@ -57,3 +57,7 @@ def test_financial_crosscheck_keeps_period_and_currency_warning(monkeypatch):
     assert result['latest_period_seen'] == '2026-09-30'
     assert any('跨期币种' in error for error in result['errors'])
     assert '2026-09-30' in result['evidence'][0]
+
+    assert 'OPERATE_INCOME' not in result['evidence'][0]
+    assert 'HKD' in result['evidence'][0]
+    assert any('已隔离' in error for error in result['errors'])

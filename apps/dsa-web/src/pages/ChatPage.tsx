@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -25,18 +25,23 @@ import {
   sanitizeFollowUpStockName,
 } from '../utils/chatFollowUp';
 import { isNearBottom } from '../utils/chatScroll';
+import { copyTextToClipboard } from '../utils/clipboard';
 import { getReportText } from '../utils/reportLanguage';
 import {
-  findMatchingStockCode,
   includesStockCode,
   resolveRegisteredIndexCanonical,
+  toAssetAwareCodeKey,
 } from '../utils/stockCode';
 import { useStockIndex } from '../hooks/useStockIndex';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
+import { localizeSkill } from '../locales/strategyText';
 
 // Quick question examples shown on empty state
 type ActiveStockContext = Pick<ChatFollowUpContext, 'stock_code' | 'stock_name'>;
 
+// Quick questions are sent verbatim as the chat message. The server confirms
+// the target stock from Chinese operation words in that text, so they are not
+// translated with the UI language.
 const QUICK_QUESTIONS: Array<{
   label: string;
   skill: string;
@@ -81,7 +86,7 @@ const getPipelineBudgetSkippedLabel = (step: ProgressStep): string => {
 };
 
 const ChatPage: React.FC = () => {
-  const { t } = useUiLanguage();
+  const { language, t } = useUiLanguage();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [input, setInput] = useState('');
@@ -104,7 +109,7 @@ const ChatPage: React.FC = () => {
   const [contextCompressionConfigVersion, setContextCompressionConfigVersion] = useState('');
   const [contextCompressionMaskToken, setContextCompressionMaskToken] = useState('******');
   const [contextCompressionError, setContextCompressionError] = useState<string | null>(null);
-  const [copiedMessages, setCopiedMessages] = useState<Set<string>>(new Set());
+  const [copyStatusByMessage, setCopyStatusByMessage] = useState<Record<string, 'copied' | 'failed'>>({});
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [watchlistCodes, setWatchlistCodes] = useState<string[]>([]);
   const [isWatchlistActioning, setIsWatchlistActioning] = useState(false);
@@ -117,6 +122,8 @@ const ChatPage: React.FC = () => {
 
   const watchlistMessageTimerRef = useRef<number | null>(null);
   const copyResetTimerRef = useRef<Partial<Record<string, number>>>({});
+  const copyRequestTokenRef = useRef<Record<string, number>>({});
+  const clipboardAttemptIdRef = useRef(0);
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
@@ -134,12 +141,15 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     const timers = copyResetTimerRef.current;
     return () => {
+      clipboardAttemptIdRef.current += 1;
       if (sendToastTimerRef.current !== null) {
         window.clearTimeout(sendToastTimerRef.current);
       }
-      Object.values(timers).forEach((timerId) => {
+      Object.keys(timers).forEach((key) => {
+        const timerId = timers[key];
         if (timerId !== undefined) {
           window.clearTimeout(timerId);
+          delete timers[key];
         }
       });
     };
@@ -173,8 +183,12 @@ const ChatPage: React.FC = () => {
   }, [loadWatchlist]);
 
   const stockInWatchlist = useCallback(
-    (stockCode: string) => includesStockCode(watchlistCodes, stockCode),
-    [watchlistCodes],
+    (stockCode: string) => includesStockCode(
+      watchlistCodes,
+      stockCode,
+      (code) => resolveRegisteredIndexCanonical(stockIndex, code) ?? toAssetAwareCodeKey(code, 'stock'),
+    ),
+    [stockIndex, watchlistCodes],
   );
 
   const handleToggleWatchlist = useCallback(
@@ -183,9 +197,8 @@ const ChatPage: React.FC = () => {
       setIsWatchlistActioning(true);
       setWatchlistMessage(null);
       try {
-        const existingStockCode = findMatchingStockCode(watchlistCodes, stockCode);
-        if (existingStockCode) {
-          const codes = await systemConfigApi.removeFromWatchlist(existingStockCode);
+        if (stockInWatchlist(stockCode)) {
+          const codes = await systemConfigApi.removeFromWatchlist(stockCode);
           if (isMountedRef.current) {
             setWatchlistCodes(codes);
             setWatchlistMessage(`已从自选中移除 ${stockCode}`);
@@ -215,7 +228,7 @@ const ChatPage: React.FC = () => {
         }
       }
     },
-    [isWatchlistActioning, watchlistCodes],
+    [isWatchlistActioning, stockInWatchlist],
   );
 
   const {
@@ -269,6 +282,7 @@ const ChatPage: React.FC = () => {
   }, [syncScrollState]);
 
   useEffect(() => {
+    clipboardAttemptIdRef.current += 1;
     syncScrollState();
   }, [syncScrollState, sessionId]);
 
@@ -434,9 +448,13 @@ const ChatPage: React.FC = () => {
       })
     : null;
 
+  const localizedSkills = useMemo(
+    () => skills.map((skill) => localizeSkill(skill, language)),
+    [language, skills],
+  );
   const getSkillNames = useCallback(
-    (skillIds: string[]) => skillIds.map((id) => skills.find((s) => s.id === id)?.name || id),
-    [skills],
+    (skillIds: string[]) => skillIds.map((id) => localizedSkills.find((s) => s.id === id)?.name || id),
+    [localizedSkills],
   );
 
   const normalizeSelectedSkillIds = useCallback((skillIds: string[]) => {
@@ -572,7 +590,7 @@ const ChatPage: React.FC = () => {
       const usedSkillIds = normalizeSelectedSkillIds(
         requestedSkillIds ?? selectedSkillIds,
       );
-      const usedSkillNames = usedSkillIds.length > 0 ? getSkillNames(usedSkillIds) : ['通用'];
+      const usedSkillNames = usedSkillIds.length > 0 ? getSkillNames(usedSkillIds) : [t('chat.generalSkillShort')];
       // Only report/shortcut hints accompany this request. Ordinary follow-ups
       // rely on the server's accepted state, not a replay or a client-selected fact.
       const contextForSend = overrideStockContext ?? followUpContextRef.current ?? undefined;
@@ -598,7 +616,7 @@ const ChatPage: React.FC = () => {
         },
       });
     },
-    [agentAvailable, agentStatus, getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, sessionSelectedSkillIds, startStream],
+    [agentAvailable, agentStatus, getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, sessionSelectedSkillIds, startStream, t],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -634,24 +652,66 @@ const ChatPage: React.FC = () => {
   };
 
   const copyMessageToClipboard = async (msgId: string, content: string) => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopiedMessages((prev) => new Set(prev).add(msgId));
-      const existingTimer = copyResetTimerRef.current[msgId];
-      if (existingTimer !== undefined) {
-        window.clearTimeout(existingTimer);
-      }
-      copyResetTimerRef.current[msgId] = window.setTimeout(() => {
-        setCopiedMessages((prev) => {
-          const next = new Set(prev);
-          next.delete(msgId);
-          return next;
-        });
-        delete copyResetTimerRef.current[msgId];
-      }, 2000);
-    } catch (err) {
-      console.error('Copy failed:', err);
+    const token = (copyRequestTokenRef.current[msgId] ?? 0) + 1;
+    copyRequestTokenRef.current[msgId] = token;
+    const clipboardAttemptId = ++clipboardAttemptIdRef.current;
+    const existingTimer = copyResetTimerRef.current[msgId];
+    if (existingTimer !== undefined) {
+      window.clearTimeout(existingTimer);
+      delete copyResetTimerRef.current[msgId];
     }
+    setCopyStatusByMessage((prev) => {
+      if (!(msgId in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[msgId];
+      return next;
+    });
+
+    const isAttemptCurrent = () =>
+      isMountedRef.current &&
+      copyRequestTokenRef.current[msgId] === token &&
+      clipboardAttemptIdRef.current === clipboardAttemptId;
+
+    let copied = false;
+    try {
+      copied = await copyTextToClipboard(content, {
+        shouldFallback: isAttemptCurrent,
+      });
+      if (!copied && isAttemptCurrent()) {
+        console.error('Copy failed: clipboard unavailable');
+      }
+    } catch (err) {
+      if (isAttemptCurrent()) {
+        console.error('Copy failed:', err);
+      }
+      copied = false;
+    }
+
+    if (!isAttemptCurrent()) {
+      return;
+    }
+
+    setCopyStatusByMessage((prev) => ({
+      ...prev,
+      [msgId]: copied ? 'copied' : 'failed',
+    }));
+
+    copyResetTimerRef.current[msgId] = window.setTimeout(() => {
+      delete copyResetTimerRef.current[msgId];
+      if (!isMountedRef.current || copyRequestTokenRef.current[msgId] !== token) {
+        return;
+      }
+      setCopyStatusByMessage((prev) => {
+        if (!(msgId in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[msgId];
+        return next;
+      });
+    }, 2000);
   };
 
   const downloadMessageAsMarkdown = useCallback((msg: Message) => {
@@ -886,8 +946,8 @@ const ChatPage: React.FC = () => {
   );
 
   const selectedSkillSummary = selectedSkillIds.length > 0
-    ? getSkillNames(selectedSkillIds).join('、')
-    : '通用分析';
+    ? getSkillNames(selectedSkillIds).join(language === 'en' ? ', ' : '、')
+    : t('chat.generalSkill');
 
   return (
     <div
@@ -1180,16 +1240,24 @@ const ChatPage: React.FC = () => {
                       expandedThinking.has(msg.id) &&
                       msg.thinkingSteps &&
                       renderThinkingDetails(msg.thinkingSteps)}
-                    {msg.role === 'assistant' ? (
+                    {msg.role === 'assistant' ? (() => {
+                      const copyStatus = copyStatusByMessage[msg.id];
+                      const copyLabel =
+                        copyStatus === 'copied'
+                          ? text.copied
+                          : copyStatus === 'failed'
+                            ? text.copyFailed
+                            : text.copy;
+                      return (
                       <div className="relative">
                         <div className="chat-message-actions">
                           <button
                             type="button"
                             onClick={() => copyMessageToClipboard(msg.id, msg.content)}
                             className="chat-copy-btn"
-                            aria-label={copiedMessages.has(msg.id) ? text.copied : text.copy}
+                            aria-label={copyLabel}
                           >
-                            {copiedMessages.has(msg.id) ? text.copied : text.copy}
+                            {copyLabel}
                           </button>
                           <button
                             type="button"
@@ -1206,7 +1274,8 @@ const ChatPage: React.FC = () => {
                           </Markdown>
                         </div>
                       </div>
-                    ) : (
+                      );
+                    })() : (
                       msg.content
                         .split('\n')
                         .map((line, i) => (
@@ -1377,14 +1446,14 @@ const ChatPage: React.FC = () => {
                   <button
                     type="button"
                     className="home-surface-button flex h-10 w-full items-center justify-between gap-3 rounded-xl px-3 text-left text-sm text-foreground md:hidden"
-                    aria-label={mobileSkillPickerOpen ? '收起策略选择' : '展开策略选择'}
+                    aria-label={mobileSkillPickerOpen ? t('chat.collapseSkillPicker') : t('chat.expandSkillPicker')}
                     aria-expanded={mobileSkillPickerOpen}
                     aria-controls="chat-skill-picker-panel"
                     onClick={() => setMobileSkillPickerOpen((open) => !open)}
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                      <span className="flex-shrink-0 font-medium">策略</span>
+                      <span className="flex-shrink-0 font-medium">{t('chat.skillPickerLabel')}</span>
                       <span className="truncate text-xs text-muted-text">{selectedSkillSummary}</span>
                     </span>
                     <ChevronDown
@@ -1404,7 +1473,7 @@ const ChatPage: React.FC = () => {
                     )}
                   >
                     <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
-                      策略
+                      {t('chat.skillPickerLabel')}
                     </span>
                     <label className="flex items-center gap-1.5 text-sm cursor-pointer group mt-0.5">
                       <input
@@ -1418,10 +1487,10 @@ const ChatPage: React.FC = () => {
                       <span
                         className={`transition-colors text-sm ${selectedSkillIds.length === 0 ? 'text-foreground font-medium' : 'text-secondary-text group-hover:text-foreground'}`}
                       >
-                        通用分析
+                        {t('chat.generalSkill')}
                       </span>
                     </label>
-                    {skills.map((s) => {
+                    {localizedSkills.map((s) => {
                       const checked = selectedSkillIdSet.has(s.id);
                       const disabled = !checked && skillLimitReached;
                       return (
@@ -1470,6 +1539,7 @@ const ChatPage: React.FC = () => {
                   variant="secondary"
                   size="xsm"
                   isLoading={isWatchlistActioning}
+                  disabled={stockIndexLoading}
                   onClick={() => void handleToggleWatchlist(activeStockCode)}
                   className="text-[11px]"
                 >

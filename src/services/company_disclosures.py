@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from zoneinfo import ZoneInfo
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -72,11 +72,15 @@ def collect_company_disclosures(code: str, stock_name: str) -> dict:
                 raise ValueError('financial crosscheck has no valid report date')
             latest_period_seen = pd.Timestamp(financials.iloc[0]['REPORT_DATE']).date().isoformat()
             if financials.head(3).get('CURRENCY', pd.Series(dtype=str)).nunique() > 1:
-                errors.append('财报交叉核验的跨期币种标记不一致，禁止直接相减推算单季数值')
+                errors.append('财报交叉核验的跨期币种标记不一致，金额及比率已隔离；仅可确认报告期，不可引用或推算财务数值')
+                # Keep discovery of a newer period, but quarantine values whose
+                # currency basis cannot be verified against an issuer filing.
+                metadata = ['REPORT_DATE', 'START_DATE', 'CURRENCY', 'DATE_TYPE_CODE']
+                financials = financials[[key for key in metadata if key in financials.columns]]
             # Preserve original period/type/currency fields. The provider may
             # report cumulative values; do not relabel these as single-quarter.
             evidence.append(
-                '[东方财富财报交叉核验，非公司公告原文] 原始报告期、币种、累计/季度口径须保留。\n'
+                '[东方财富财报交叉核验，非公司公告原文] 不得称为官方口径；原始报告期、币种、累计/季度口径须保留。\n'
                 '来源 https://emweb.securities.eastmoney.com/PC_HKF10/NewFinancialAnalysis/index?type=web&code=02015\n'
                 + financials.head(3).to_json(orient='records', force_ascii=False, date_format='iso')
             )
@@ -133,5 +137,5 @@ def collect_company_disclosures(code: str, stock_name: str) -> dict:
     except Exception as exc:
         # Optional external provider failure must remain visible to the report.
         errors.append(f'公开资讯接口获取失败 ({type(exc).__name__})')
-    logger.info('[Company disclosures] %s evidence=%d errors=%s', code, len(evidence), errors)
+    logger.info('[Company disclosures] %s evidence=%d errors=%s', code, len(evidence), len(errors))
     return {'evidence': evidence, 'errors': errors, 'checked_at': now.isoformat(), 'latest_period_seen': latest_period_seen}
