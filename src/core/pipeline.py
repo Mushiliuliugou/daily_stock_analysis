@@ -732,6 +732,23 @@ class StockAnalysisPipeline:
             else:
                 logger.info(f"{stock_name}({code}) 搜索服务不可用，跳过情报搜索")
 
+            # Public disclosures remain available even without a paid search key.
+            company_disclosures = None
+            if not is_index:
+                from src.services.company_disclosures import collect_company_disclosures
+                company_disclosures = collect_company_disclosures(code, stock_name)
+                if company_disclosures.get('evidence'):
+                    news_result_count = (news_result_count or 0) + len(company_disclosures['evidence'])
+                latest_period = company_disclosures.get('latest_period_seen')
+                if latest_period and isinstance(fundamental_context, dict):
+                    from copy import deepcopy
+                    fundamental_context = deepcopy(fundamental_context)
+                    report = ((fundamental_context.get('earnings') or {}).get('data') or {}).get('financial_report') or {}
+                    if report.get('report_date') and latest_period > str(report['report_date'])[:10]:
+                        report['newer_period_seen'] = latest_period
+                        report['verification_status'] = 'outdated_structured_report'
+
+
             # Step 4.5: Social sentiment intelligence (US stocks only)
             social_evidence_context: Optional[str] = None
             if self.social_sentiment_service is not None and self.social_sentiment_service.is_available and is_us_stock_code(code):
@@ -786,6 +803,10 @@ class StockAnalysisPipeline:
                 portfolio_context=portfolio_context,
             )
             enhanced_context["market_phase_context"] = market_phase_context_dict
+            enhanced_context["company_disclosures"] = company_disclosures
+            enhanced_context["news_search_available"] = bool(
+                self.search_service is not None and self.search_service.is_available
+            )
             self._attach_daily_market_context(
                 enhanced_context,
                 daily_market_context,
@@ -1051,6 +1072,7 @@ class StockAnalysisPipeline:
                 'name': getattr(realtime_quote, 'name', ''),
                 'price': getattr(realtime_quote, 'price', None),
                 'change_pct': getattr(realtime_quote, 'change_pct', None),
+                'pre_close': getattr(realtime_quote, 'pre_close', None),
                 'volume_ratio': volume_ratio,
                 'volume_ratio_desc': self._describe_volume_ratio(volume_ratio) if volume_ratio else '无数据',
                 'turnover_rate': getattr(realtime_quote, 'turnover_rate', None),

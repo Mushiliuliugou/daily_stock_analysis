@@ -365,3 +365,23 @@ class YoyFromRowTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_quarterly_revenue_is_not_filled_with_ttm():
+    income = pd.DataFrame({'2026-09-30': [123.0]}, index=['Net Income'])
+    ticker = _build_mock_ticker({'totalRevenue': 9999, 'operatingCashflow': 8888}, income_stmt=income)
+    with patch('yfinance.Ticker', return_value=ticker):
+        report = YfinanceFundamentalAdapter().get_fundamental_bundle('HK02015')['earnings']['financial_report']
+    assert report['revenue'] is None
+    assert report['operating_cash_flow'] is None
+    assert report['period_type'] == 'quarterly'
+
+
+def test_cashflow_must_match_income_period():
+    income = pd.DataFrame({'2026-09-30': [100.0]}, index=['Total Revenue'])
+    cashflow = pd.DataFrame({'2026-06-30': [50.0]}, index=['Operating Cash Flow'])
+    ticker = _build_mock_ticker({}, income_stmt=income, cashflow=cashflow)
+    with patch('yfinance.Ticker', return_value=ticker):
+        bundle = YfinanceFundamentalAdapter().get_fundamental_bundle('HK02015')
+    assert bundle['earnings']['financial_report']['operating_cash_flow'] is None
+    assert 'cashflow_period_mismatch_or_missing' in bundle['errors']

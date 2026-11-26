@@ -28,6 +28,7 @@ mark the block as ``partial`` when only some fields are populated.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -57,7 +58,7 @@ def _safe_float(value: Any) -> Optional[float]:
         result = float(value)
     except (TypeError, ValueError):
         return None
-    if result != result:  # NaN guard
+    if not math.isfinite(result):  # Reject NaN and infinity
         return None
     return result
 
@@ -221,7 +222,10 @@ class YfinanceFundamentalAdapter:
             income_df = None
         if income_df is not None and not income_df.empty:
             try:
-                if all(hasattr(col, "to_pydatetime") or isinstance(col, (datetime, pd.Timestamp)) for col in income_df.columns):
+                parsed_dates = pd.to_datetime(income_df.columns, errors='coerce')
+                if parsed_dates.notna().all():
+                    income_df = income_df.copy()
+                    income_df.columns = parsed_dates
                     income_df = income_df.reindex(columns=sorted(income_df.columns, reverse=True))
                 first_col = income_df.columns[0]
                 ts = pd.to_datetime(first_col, errors="coerce")
@@ -240,17 +244,22 @@ class YfinanceFundamentalAdapter:
             result["errors"].append(f"quarterly_cashflow:{type(exc).__name__}")
             cashflow_df = None
         if cashflow_df is not None and not cashflow_df.empty:
-            operating_cash_flow_latest = _latest_value(_pick_row(cashflow_df, _CASHFLOW_OP_KEYS))
+            cashflow_row = _pick_row(cashflow_df, _CASHFLOW_OP_KEYS)
+            if cashflow_row is not None and report_date:
+                for column, value in cashflow_row.items():
+                    if pd.to_datetime(column, errors='coerce').date().isoformat() == report_date:
+                        operating_cash_flow_latest = _safe_float(value)
+                        break
+                if operating_cash_flow_latest is None:
+                    result['errors'].append('cashflow_period_mismatch_or_missing')
 
-        # Fallback to TTM aggregates from .info when quarterly statements are
-        # unavailable — still produces a non-empty row.
-        if revenue_latest is None:
-            revenue_latest = _safe_float(info.get("totalRevenue"))
-        if operating_cash_flow_latest is None:
-            operating_cash_flow_latest = _safe_float(info.get("operatingCashflow"))
-        if net_profit_latest is None and revenue_latest is not None:
-            margin = _safe_float(info.get("profitMargins"))
-            if margin is not None:
+        # TTM is a separate basis. Never fill an incomplete quarter with TTM.
+        period_type = 'quarterly' if report_date else 'ttm'
+        if not report_date:
+            revenue_latest = _safe_float(info.get('totalRevenue'))
+            operating_cash_flow_latest = _safe_float(info.get('operatingCashflow'))
+            margin = _safe_float(info.get('profitMargins'))
+            if revenue_latest is not None and margin is not None:
                 net_profit_latest = revenue_latest * margin
 
         # Statement-derived YoY (requires the same quarter a year earlier) is preferred
@@ -268,13 +277,14 @@ class YfinanceFundamentalAdapter:
 
         financial_report = {
             "report_date": report_date,
+            "period_type": period_type,
             "revenue": revenue_latest,
             "net_profit_parent": net_profit_latest,
             "operating_cash_flow": operating_cash_flow_latest,
             "roe": growth_payload.get("roe"),
             "currency": financial_currency,
         }
-        if any(v is not None and v != "" for v in financial_report.values()):
+        if any(v is not None and v != "" for k, v in financial_report.items() if k != "period_type"):
             result.setdefault("earnings", {})["financial_report"] = financial_report
             result["source_chain"].append("earnings.financial_report:yfinance")
 

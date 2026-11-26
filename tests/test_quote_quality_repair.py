@@ -69,3 +69,16 @@ def test_hk_single_quote_falls_back_after_two_failures(monkeypatch):
     monkeypatch.setattr('data_provider.akshare_fetcher.time.sleep', lambda _: None)
     assert AkshareFetcher()._get_hk_single_quote('HK02015') is None
     assert get.call_count == 2
+
+
+def test_snapshot_uses_quote_previous_close_instead_of_adjusted_history():
+    from src.analyzer import GeminiAnalyzer
+    analyzer = GeminiAnalyzer.__new__(GeminiAnalyzer)
+    result = analyzer._build_market_snapshot({
+        'date': '2026-11-25',
+        'today': {'close': 43.62, 'open': 41.38, 'high': 43.92, 'low': 41.38},
+        'yesterday': {'close': 41.62},
+        'realtime': {'price': 43.62, 'pre_close': 41.38},
+    })
+    assert result['prev_close'] == '41.38'
+    assert result['change_amount'] == '2.24'

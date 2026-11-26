@@ -1469,7 +1469,7 @@ class NotificationService(
                     # 量能分析
                     if vol_data:
                         report_lines.extend([
-                            f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {_format_volume_metric(vol_data.get('volume_ratio'))} ({vol_data.get('volume_status', '')}) | "
+                            f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {_format_volume_metric(vol_data.get('volume_ratio'))} | "
                             f"{labels['turnover_rate_label']} {_format_volume_metric(vol_data.get('turnover_rate'), percent=True)}",
                             f"💡 *{vol_data.get('volume_meaning', '')}*",
                             "",
@@ -2155,6 +2155,20 @@ class NotificationService(
 
         report_language = self._get_report_language(result)
         labels = get_report_labels(report_language)
+        if snapshot.get('is_partial_bar'):
+            lines.extend(['> 未完成日线 / Incomplete daily bar. This snapshot is not a closing report.', ''])
+        if snapshot.get('daily_volume_change_ratio') is not None:
+            lines.extend([
+                '> 日成交量 ÷ 前一交易日全天成交量 / Previous full-day volume ratio: '
+                + _format_volume_metric(snapshot['daily_volume_change_ratio']), '',
+            ])
+        check = snapshot.get('disclosure_check')
+        if check is not None:
+            if report_language == 'zh':
+                lines.append(f"公告与资讯核验：取得 {check['evidence_count']} 条证据。" + '；'.join(check['errors']))
+            else:
+                lines.append(f"Disclosure check: {check['evidence_count']} evidence items. " + '; '.join(check['errors']))
+            lines.append('')
 
         lines.extend([
             f"### 📈 {labels['market_snapshot_heading']}",
@@ -2324,6 +2338,14 @@ class NotificationService(
         report = blocks.get("financial_report") or {}
         growth = blocks.get("growth") or {}
         currency = report.get("currency") if isinstance(report.get("currency"), str) else None
+        if report.get('newer_period_seen'):
+            lines.extend([
+                f"> 财报时效提醒 / Financial freshness: structured table {report.get('report_date')} ; "
+                f"newer period {report['newer_period_seen']} found. 表中旧数据不能代表最新业绩。",
+                '',
+            ])
+        if report.get('period_type'):
+            lines.extend([f"> 财报口径 / Statement basis: {report['period_type']}. ROE and growth ratios retain their source basis.", ''])
         cells = {
             "report_date": self._format_text(report.get("report_date")),
             "revenue": self._format_amount_cn(report.get("revenue"), currency),

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 增加万科与理想汽车公告及公开资讯补充、较新报告期提示，分离季度与 TTM 数据并校验现金流报告期，修正快照昨收口径及量能展示。
+
 - [修复] 港股单股票行情补齐、日线成交量单位校验、缺失指标格式及市场统计失败处理。
 
 
