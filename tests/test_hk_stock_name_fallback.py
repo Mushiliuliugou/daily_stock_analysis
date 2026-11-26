@@ -90,7 +90,9 @@ class TestHKRealtimeFallback(unittest.TestCase):
         self.fetcher = AkshareFetcher()
         # These tests exercise the original all-market/Sina fallback after
         # the new single-symbol endpoint has failed.
-        self.fetcher._get_hk_single_quote = MagicMock(return_value=None)
+        single_quote = patch.object(AkshareFetcher, "_get_hk_single_quote", return_value=None)
+        single_quote.start()
+        self.addCleanup(single_quote.stop)
         akshare_fetcher_module._hk_realtime_cache.update({
             "data": None,
             "timestamp": 0,

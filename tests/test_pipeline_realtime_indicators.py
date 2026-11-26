@@ -854,6 +854,7 @@ class TestEnhanceContextRealtimeOverride(unittest.TestCase):
                 with (
                     patch.dict(sys.modules, {"akshare": ak}),
                     patch.dict(_hk_realtime_cache, cache),
+                    patch.object(AkshareFetcher, "_get_hk_single_quote", return_value=None),
                     patch("data_provider.akshare_fetcher.time.time", return_value=now.timestamp()),
                     patch("data_provider.akshare_fetcher.get_config", return_value=config),
                     patch("data_provider.akshare_fetcher.get_realtime_circuit_breaker") as breaker,
