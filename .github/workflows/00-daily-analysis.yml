@@ -457,7 +457,7 @@ jobs:
           # ==========================================
           LOG_LEVEL: INFO
           MAX_WORKERS: ${{ vars.MAX_WORKERS || secrets.MAX_WORKERS || '1' }}
-          PER_STOCK_TIMEOUT_SECONDS: ${{ vars.PER_STOCK_TIMEOUT_SECONDS || secrets.PER_STOCK_TIMEOUT_SECONDS }}
+          PER_STOCK_TIMEOUT_SECONDS: ${{ vars.PER_STOCK_TIMEOUT_SECONDS || secrets.PER_STOCK_TIMEOUT_SECONDS || '600' }}
           # 筹码分布：默认 false（云端接口不稳定）；需启用时在 Settings → Variables 添加 ENABLE_CHIP_DISTRIBUTION=true
           ENABLE_CHIP_DISTRIBUTION: ${{ vars.ENABLE_CHIP_DISTRIBUTION || secrets.ENABLE_CHIP_DISTRIBUTION || 'false' }}
           # 实时行情数据源优先级（未设置时由运行时按已配置的 Key 自动选择）
@@ -576,6 +576,22 @@ jobs:
             python main.py $FORCE_RUN_ARG
           fi
       
+      - name: 校验个股分析完成情况
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          logs = sorted(Path('logs').glob('stock_analysis_[0-9]*.log'), key=lambda p: p.stat().st_mtime)
+          summaries = re.findall(r'Succeeded: (\d+), failed: (\d+)', logs[-1].read_text(errors='replace')) if logs else []
+          if summaries:
+              succeeded, failed = map(int, summaries[-1])
+              print(f'Stock analysis validation: succeeded={succeeded}, failed={failed}')
+              if failed:
+                  raise SystemExit('Stock analysis incomplete; inspect the uploaded logs and reports.')
+          else:
+              print('No stock analysis summary; market-only or a skipped session.')
+          PY
+
       - name: 上传分析报告
         uses: actions/upload-artifact@v6
         if: always()
