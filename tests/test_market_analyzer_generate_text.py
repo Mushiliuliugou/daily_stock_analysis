@@ -1144,6 +1144,28 @@ class TestAnalyzerGenerateText:
         _assert_usage_contains(usage, {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3})
         assert progress_updates == [3, 6]
 
+    @pytest.mark.parametrize("partial", ['{"sentiment_score":', ''])
+    def test_token_limited_stream_retries_once_with_larger_budget(self, partial):
+        analyzer = self._make_analyzer()
+        analyzer._config_override = SimpleNamespace(
+            litellm_model="openai/test-model", litellm_fallback_models=[], llm_model_list=[],
+        )
+        stream = iter([SimpleNamespace(choices=[SimpleNamespace(
+            delta=SimpleNamespace(content=partial), finish_reason="length",
+        )], usage=None)])
+        complete = '{"sentiment_score": 50, "analysis_summary": "verified"}'
+        response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=complete))])
+        with patch.object(analyzer, "_dispatch_litellm_completion", side_effect=[stream, response]) as call:
+            text, _, _ = analyzer._call_litellm(
+                "Return JSON", {"max_tokens": 8192}, stream=True,
+                response_validator=analyzer._validate_json_response,
+            )
+        assert text == complete
+        assert call.call_count == 2
+        assert call.call_args_list[0].args[1]["max_tokens"] == 8192
+        assert call.call_args_list[1].args[1]["max_tokens"] == 16384
+        assert not call.call_args_list[1].args[1].get("stream")
+
     def test_call_litellm_stream_reads_private_hidden_usage_best_effort(self):
         analyzer = self._make_analyzer()
         analyzer._config_override = SimpleNamespace(

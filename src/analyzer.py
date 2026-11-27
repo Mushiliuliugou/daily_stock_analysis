@@ -304,9 +304,10 @@ def _legacy_audit_marker_specs(
 class _LiteLLMStreamError(RuntimeError):
     """Internal error wrapper that records whether any text was streamed."""
 
-    def __init__(self, message: str, *, partial_received: bool = False):
+    def __init__(self, message: str, *, partial_received: bool = False, token_limit: bool = False):
         super().__init__(message)
         self.partial_received = partial_received
+        self.token_limit = token_limit
 
 
 class _AllModelsFailedError(Exception):
@@ -3725,9 +3726,13 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
         model_list = getattr(self._get_runtime_config(), "llm_model_list", [])
         chars_received = 0
         next_emit_at = 1
+        finish_reason = None
 
         try:
             for chunk in stream_response:
+                choices = self._get_response_field(chunk, 'choices') or []
+                if choices:
+                    finish_reason = self._get_response_field(choices[0], 'finish_reason') or finish_reason
                 chunk_model, chunk_provider = self._resolve_response_model_provider(
                     chunk,
                     fallback_provider=response_provider,
@@ -3761,6 +3766,12 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
             ) from exc
 
         response_text = strip_leading_think_wrapper("".join(chunks))
+        if finish_reason in {'length', 'max_tokens'}:
+            raise _LiteLLMStreamError(
+                f"{model} stream reached the output token limit",
+                partial_received=chars_received > 0,
+                token_limit=True,
+            )
         if not response_text:
             raise _LiteLLMStreamError(
                 f"{model} stream returned empty response",
@@ -4079,6 +4090,15 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                             progress_callback=stream_progress_callback,
                         )
                     except _LiteLLMStreamError as exc:
+                        if exc.token_limit:
+                            # Reuse the existing one-shot non-stream fallback.
+                            # Reasoning and answer text may share this budget.
+                            old_budget = int(call_kwargs.get("max_tokens") or max_tokens)
+                            call_kwargs["max_tokens"] = max(old_budget, min(old_budget * 2, 16384))
+                            logger.warning(
+                                "[LiteLLM] %s token-limited stream; bounded retry budget=%s",
+                                model, call_kwargs["max_tokens"],
+                            )
                         safe_error = self._sanitize_litellm_exception_text(exc, config=config, model=model)
                         if exc.partial_received:
                             logger.warning(
