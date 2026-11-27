@@ -1415,11 +1415,11 @@ class StockAnalysisPipeline:
                 source = getattr(realtime_quote, 'source', None)
                 source_name = getattr(source, 'value', source)
                 source_name = str(source_name) if source_name is not None else 'unknown'
-                open_p = getattr(realtime_quote, 'open_price', None) or getattr(
-                    realtime_quote, 'pre_close', None
-                ) or yesterday_close or orig_today.get('open') or price
-                high_p = getattr(realtime_quote, 'high', None) or price
-                low_p = getattr(realtime_quote, 'low', None) or price
+                # Missing session OHLC must stay missing: a last price or
+                # previous close cannot establish an open or a session range.
+                open_p = getattr(realtime_quote, 'open_price', None)
+                high_p = getattr(realtime_quote, 'high', None)
+                low_p = getattr(realtime_quote, 'low', None)
                 vol = getattr(realtime_quote, 'volume', None)
                 amt = getattr(realtime_quote, 'amount', None)
                 pct = getattr(realtime_quote, 'change_pct', None)

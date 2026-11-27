@@ -786,7 +786,7 @@ class TestEnhanceContextRealtimeOverride(unittest.TestCase):
                 self.assertEqual(enhanced["yesterday"]["date"],
                                  "2026-11-12" if shifts else "2026-11-11")
 
-    def test_intraday_open_fallback_uses_shifted_yesterday_close(self) -> None:
+    def test_missing_intraday_open_is_not_fabricated_from_shifted_yesterday_close(self) -> None:
         now = datetime(2026, 11, 13, 14, 28, tzinfo=ZoneInfo("Asia/Seoul"))
         phase = build_market_phase_context(market="kr", current_time=now).to_dict()
         stored_context = self._kr_005930_context()
@@ -804,7 +804,7 @@ class TestEnhanceContextRealtimeOverride(unittest.TestCase):
                 market_phase_context=phase,
             )
 
-        self.assertEqual(enhanced["today"]["open"], 208000.0)
+        self.assertIsNone(enhanced["today"]["open"])
         self.assertEqual(enhanced["yesterday"]["date"], "2026-11-12")
 
     def test_missing_or_invalid_quote_time_keeps_baseline_despite_price_changes(self) -> None:
@@ -889,6 +889,8 @@ class TestEnhanceContextRealtimeOverride(unittest.TestCase):
                     snapshot = GeminiAnalyzer.__new__(GeminiAnalyzer)._build_market_snapshot(enhanced)
                     self.assertEqual(snapshot["prev_close"], "100.00")
                     self.assertEqual(snapshot["change_amount"], "10.00")
+                    for field in ("open", "high", "low", "amplitude"):
+                        self.assertEqual(snapshot[field], "N/A")
 
     def test_postmarket_shifts_yesterday_for_current_session_quote_but_not_stale_prior_session_quote(self) -> None:
         now = datetime(2026, 11, 13, 17, 0, tzinfo=ZoneInfo("Asia/Seoul"))

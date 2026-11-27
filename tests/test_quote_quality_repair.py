@@ -82,3 +82,12 @@ def test_snapshot_uses_quote_previous_close_instead_of_adjusted_history():
     })
     assert result['prev_close'] == '41.38'
     assert result['change_amount'] == '2.24'
+
+
+def test_hk_valid_single_quote_keeps_timestamp_without_optional_metrics(monkeypatch):
+    from data_provider.realtime_types import UnifiedRealtimeQuote, RealtimeSource
+    quote = UnifiedRealtimeQuote(code='HK02015', source=RealtimeSource.AKSHARE_EM,
+                                 price=45.8, high=48.0, low=44.0,
+                                 provider_timestamp='2026-11-26T08:08:05+00:00')
+    monkeypatch.setattr(AkshareFetcher, '_get_hk_single_quote', lambda *args: quote)
+    assert AkshareFetcher()._get_hk_realtime_quote('HK02015') is quote

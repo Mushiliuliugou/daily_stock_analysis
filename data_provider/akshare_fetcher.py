@@ -1721,7 +1721,7 @@ class AkshareFetcher(BaseFetcher):
             UnifiedRealtimeQuote 对象，获取失败返回 None
         """
         single_quote = self._get_hk_single_quote(stock_code)
-        if single_quote is not None and single_quote.volume_ratio is not None and single_quote.turnover_rate is not None:
+        if single_quote is not None:
             return single_quote
         import akshare as ak
         circuit_breaker = get_realtime_circuit_breaker()
