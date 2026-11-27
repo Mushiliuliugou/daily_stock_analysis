@@ -53,7 +53,7 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: 校验分析代码语法
+      - name: 校验分析与数据源代码语法
         run: python -m compileall -q src data_provider
 
       - name: 安装依赖
